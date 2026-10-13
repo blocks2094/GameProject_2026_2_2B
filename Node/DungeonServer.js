@@ -1,7 +1,7 @@
 const express = require("express");
 
 const app = express();
-const port = 3000;
+const port = 3001;
 app.use(express.json());
 
 let player = {
@@ -16,9 +16,9 @@ let player = {
 
 let dungeonRun = null;
 
-function suceess(res, code,message, data, status = 200)
+function success(res, code, message, data, status = 200)
 {
-    return res.status(status).json({success: true, code, message, date});
+    return res.status(status).json({success: true, code, message, data});
 }
 
 function failure(res, status, code, message)
@@ -30,7 +30,7 @@ function createRooms()
 {
     return [
         {index : 0 , type : "MONSTER", state: "ACTIVE" , monsterName : "슬라임", monsterHp:30, monsterAttack: 5, rewardGold : 10},
-        {index : 1 , type : "TRESAURE", state: "LOCKED" , monsterName : "", monsterHp : 0, monsterAttack : 0, rewardGold : 20},
+        {index : 1 , type : "TREASURE", state: "LOCKED" , monsterName : "", monsterHp : 0, monsterAttack : 0, rewardGold : 20},
         {index : 2 , type : "HEAL", state: "LOCKED" , monsterName : "", monsterHp :30, monsterAttack : 0, rewardGold : 0},
         {index : 3 , type : "MONSTER", state: "LOCKED" , monsterName : "고블린", monsterHp : 45, monsterAttack : 8, rewardGold : 25},
         {index : 4 , type : "EXIT", state: "LOCKED" , monsterName : "", monsterHp : 0, monsterAttack : 0, rewardGold : 0},
@@ -39,30 +39,31 @@ function createRooms()
 
 function currentRoom()
 {
-    return dungeonRun.rooms[doungeonRun.currentRoomIndex];
+    return dungeonRun.rooms[dungeonRun.currentRoomIndex];
 }
 
 function gameState()
 {
     return {
-        run : dungeonRun ? {
-            if : dungeonRun.id,
-            state : dungeonRun.state,
-            currentRoomIndex : dungeonRun.currentRoomIndex,
-            runGold : dungeonRun.runGold,
+        player,
+        run: dungeonRun ? {
+            id: dungeonRun.id,
+            state: dungeonRun.state,
+            currentRoomIndex: dungeonRun.currentRoomIndex,
+            runGold: dungeonRun.runGold,
             currentRoom: currentRoom()
         } : null
     };
 }
 
-app.get("api/game/state" , (req, res) => {
-    return success(res, "GAME_STATE_LOADED" , "게임 상태를 불러 왔습니다." , gmaeState());
+app.get("/api/game/state" , (req, res) => {
+    return success(res, "GAME_STATE_LOADED" , "게임 상태를 불러 왔습니다." , gameState());
 })
 
 app.post("/api/dungeon/enter" , (req,res) => {
     if(dungeonRun && dungeonRun.state == "IN_PROGRESS")
     {
-        return failure(res, 409, "RUN_ALREAY" , "이미 탐험 중입니다.");
+        return failure(res, 409, "RUN_ALREAY_ACTIVE" , "이미 탐험 중입니다.");
     }
 
     player.hp = player.maxHp;
@@ -75,7 +76,7 @@ app.post("/api/dungeon/enter" , (req,res) => {
         rooms : createRooms()
     };
 
-    return success(res, "DUNGEON_ENTERED", "던전에 입장했습니다." , gmaeState(), 201);
+    return success(res, "DUNGEON_ENTERED", "던전에 입장했습니다." , gameState(), 201);
 });
 
 app.post("/api/dungeon/action" , (req,res) =>
@@ -85,16 +86,16 @@ app.post("/api/dungeon/action" , (req,res) =>
         return failure(res, 404, "NO_ACTIVE_RUN" , "진행 중인 탐험이 없습니다");
     }
 
-    const action = req.body.action;
+    const action = req.body && req.body.action;
     const room = currentRoom();
 
-    if(action === "ATTACK" && room.type === "MONSTER" && room.state == "ACTIVE")
+    if(action === "ATTACK" && room.type === "MONSTER" && room.state === "ACTIVE")
     {
         room.monsterHp = Math.max(0, room.monsterHp - player.attack);
 
         if (room.monsterHp === 0)
         {
-            room.state = "CLERAED";
+            room.state = "CLEARED";
             dungeonRun.runGold += room.rewardGold;
             return success(res, "MONSTER_DEFEATED", "몬스터를 처치했습니다." , gameState());
         }
@@ -105,12 +106,12 @@ app.post("/api/dungeon/action" , (req,res) =>
         {
             dungeonRun.state = "DEAD";
             dungeonRun.runGold = 0;
-            return success(req, "PLAYER_DEAD", "플레이어가 사망했습니다." , gmaeState());
+            return success(res, "PLAYER_DEAD", "플레이어가 사망했습니다." , gameState());
         }
         return success (res, "ATTACK_RESOLVED" , "서로 공격했습니다." , gameState());
     }
 
-    if(action === "OPEN_CHEST" && room.type === "TAEASURE" && room.state === "ACTIVE")
+    if(action === "OPEN_CHEST" && room.type === "TREASURE" && room.state === "ACTIVE")
     {
         room.state = "CLEARED";
         dungeonRun.runGold += room.rewardGold;
@@ -121,10 +122,10 @@ app.post("/api/dungeon/action" , (req,res) =>
     {
         room.state = "CLEARED";
         player.hp = Math.min(player.maxHp , player.hp + 30);
-        return success(res, "TREASURE_OPENED" , "체력을 회복했습니다." , gameState());
+        return success(res, "PLAYER_HEALED" , "체력을 회복했습니다." , gameState());
     }
 
-     if(action === "NEXT_ROOM" && room.type === "CLEARED")
+     if(action === "NEXT_ROOM" && room.state === "CLEARED")
     {
         if(dungeonRun.currentRoomIndex >= dungeonRun.rooms.length - 1)
         {
@@ -133,15 +134,30 @@ app.post("/api/dungeon/action" , (req,res) =>
 
         dungeonRun.currentRoomIndex += 1;
         currentRoom().state = "ACTIVE";
-        return suceess(res, "DUNGEON_RETUREND" , "탐험을 마치고 귀환했습니다." . gameState()); 
+        return success(res, "ROOM_ADVANCED" , "다음 방으로 이동했습니다." , gameState());
+    }
+
+    if(action === "RETURN" && room.type === "EXIT" && room.state === "ACTIVE")
+    {
+        player.gold += dungeonRun.runGold;
+        dungeonRun.runGold = 0;
+        dungeonRun.state = "RETURNED";
+
+        return success(res, "DUNGEON_RETURNED", "탐험을 마치고 귀환했습니다.", gameState());
     }
 
     return failure(res, 409, "ACTION_NOT_ALLOWED", "현재 방에서 할 수 없는 행동입니다.");
 });
 
-app.listen(port, () => {
+app.use((req, res) => failure(res, 404, "NOT_FOUND", "요청한 API를 찾을 수 없습니다."));
+
+app.use((err, req, res, next) => {
+    console.error(err);
+    const status = err.status || 500;
+    return failure(res, status, "SERVER_ERROR", status === 400 ? "요청 JSON 형식이 올바르지 않습니다." : "서버 처리 중 오류가 발생했습니다.");
+});
+
+app.listen(port, "127.0.0.1", () => {
 
     console.log(`server : http://127.0.0.1:${port}`);
 });
-
- 
